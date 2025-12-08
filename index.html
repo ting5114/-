@@ -530,39 +530,81 @@
             // 圖片不做回顯，因為 input file 限制
         }
 
+        // --- 修正後的：購物儲存 (含圖片壓縮功能) ---
         function saveShopping() {
             const name = document.getElementById('shopName').value;
             if(!name) return alert('請輸入商品名');
+            
             const fileInput = document.getElementById('shopImg');
             
-            const processSave = (img) => {
+            // 定義儲存邏輯
+            const pushToFirebase = (imgData) => {
                 const data = {
-                    name, price: document.getElementById('shopPrice').value,
+                    name, 
+                    price: document.getElementById('shopPrice').value,
                     cat: document.getElementById('shopCat').value,
+                    checked: false
                 };
-                if(img) data.img = img; // 只有當有新圖片時才更新圖片
+                
+                // 只有當有圖片資料時才存入 (節省流量)
+                if(imgData) data.img = imgData;
                 else if(editingId) {
+                    // 如果是編輯模式且沒換新圖，嘗試保留舊圖
                     const old = shopping.find(s=>s.id===editingId);
-                    if(old) data.img = old.img; // 維持舊圖
-                } else data.img = null;
+                    if(old && old.img) data.img = old.img;
+                }
 
                 if(editingId) {
-                    // 保持 checked 狀態
+                    // 編輯模式：保留原本的 checked 狀態
                     const old = shopping.find(s=>s.id===editingId);
                     data.checked = old ? old.checked : false;
                     update(ref(db, `shopping/${editingId}`), data);
                 } else {
-                    data.checked = false;
+                    // 新增模式
                     push(ref(db, 'shopping'), data);
                 }
                 closeModal('shoppingModal');
             };
 
+            // 如果有選圖片，進行壓縮
             if(fileInput.files[0]) {
+                const file = fileInput.files[0];
                 const reader = new FileReader();
-                reader.onload = (e) => processSave(e.target.result);
-                reader.readAsDataURL(fileInput.files[0]);
-            } else processSave(null);
+                
+                reader.onload = function(event) {
+                    const img = new Image();
+                    img.onload = function() {
+                        // --- 壓縮邏輯開始 ---
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        
+                        // 設定最大寬度為 800px (夠手機看了，且檔案很小)
+                        const MAX_WIDTH = 800;
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        // 轉成壓縮後的 Base64 (品質 0.7)
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                        // --- 壓縮邏輯結束 ---
+                        
+                        pushToFirebase(dataUrl);
+                    }
+                    img.src = event.target.result;
+                }
+                reader.readAsDataURL(file);
+            } else {
+                // 沒選圖片，直接存文字
+                pushToFirebase(null);
+            }
         }
         function deleteShop(id) { if(confirm('刪除？')) remove(ref(db, `shopping/${id}`)); }
         function toggleShopCheck(id, status) { update(ref(db, `shopping/${id}`), { checked: status }); }
